@@ -18,11 +18,11 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Webhook extends Model
 {
-    use HasFactory, MassPrunable;
+    use MassPrunable;
 
     protected $fillable = ['payload', 'successful_at', 'event', 'endpoint'];
 
-    public function casts()
+    public function casts(): array
     {
         return [
             'payload' => 'array',

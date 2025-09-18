@@ -193,7 +193,7 @@ class WebhookConfiguration extends Model
         $eventName ??= 'eloquent.created: '.Server::class;
         $eventData ??= $this->getWebhookSampleData();
 
-        ProcessWebhook::dispatch($this, $eventName, [$eventData]);
+        ProcessWebhook::dispatch($this, $eventName, $eventData);
     }
 
     /**

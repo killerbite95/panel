@@ -18,59 +18,71 @@ class ProcessWebhook implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
-     * @param  array<mixed>  $data
+     * @param  array<mixed>|string|null  $data
      */
     public function __construct(
         private WebhookConfiguration $webhookConfiguration,
         private string $eventName,
-        private array $data
+        private array|string|null $data = null
     ) {}
 
     public function handle(): void
     {
-        $data = $this->data[0] ?? [];
-        if (count($data) === 1) {
-            $data = reset($data);
-        }
-        $data = is_array($data) ? $data : (json_decode($data, true) ?? []);
-        $data['event'] = $this->webhookConfiguration->transformClassName($this->eventName);
+        $payload = is_array($this->data) ? $this->data : (json_decode($this->data, true) ?? []);
+        $payload['event'] = $this->webhookConfiguration->transformClassName($this->eventName);
 
         if ($this->webhookConfiguration->type === WebhookType::Discord) {
-            $payload = json_encode($this->webhookConfiguration->payload);
-            $tmp = $this->webhookConfiguration->replaceVars($data, $payload);
-            $data = json_decode($tmp, true);
-
-            $embeds = data_get($data, 'embeds');
-            if ($embeds) {
-                foreach ($embeds as &$embed) {
-                    if (data_get($embed, 'has_timestamp')) {
-                        $embed['timestamp'] = Carbon::now();
-                        unset($embed['has_timestamp']);
-                    }
-                }
-                $data['embeds'] = $embeds;
-            }
+            $payload = $this->convertToDiscord($payload);
         }
 
         try {
-            $customHeaders = $this->webhookConfiguration->headers;
+            $customHeaders = $this->webhookConfiguration->headers ?: [];
             $headers = [];
             foreach ($customHeaders as $key => $value) {
-                $headers[$key] = $this->webhookConfiguration->replaceVars($data, $value);
+                $headers[$key] = $this->webhookConfiguration->replaceVars($payload, $value);
             }
 
-            Http::withHeaders($headers)->post($this->webhookConfiguration->endpoint, $data)->throw();
+            Http::withHeaders($headers)->post($this->webhookConfiguration->endpoint, $payload)->throw();
             $successful = now();
         } catch (Exception $exception) {
             report($exception->getMessage());
             $successful = null;
         }
 
+        $this->logWebhookCall($payload, $successful);
+    }
+
+    private function logWebhookCall(array $payload, Carbon $success): void
+    {
         $this->webhookConfiguration->webhooks()->create([
-            'payload' => $data,
-            'successful_at' => $successful,
+            'payload' => $payload,
+            'successful_at' => $success,
             'event' => $this->eventName,
             'endpoint' => $this->webhookConfiguration->endpoint,
         ]);
+    }
+
+    /**
+     * @param  mixed  $data
+     * @return array
+     */
+    public function convertToDiscord(mixed $data): array
+    {
+        $payload = json_encode($this->webhookConfiguration->payload);
+        $tmp = $this->webhookConfiguration->replaceVars($data, $payload);
+        $data = json_decode($tmp, true);
+
+        $embeds = data_get($data, 'embeds');
+        if ($embeds) {
+            // copied from previous, is the & needed?
+            foreach ($embeds as &$embed) {
+                if (data_get($embed, 'has_timestamp')) {
+                    $embed['timestamp'] = Carbon::now();
+                    unset($embed['has_timestamp']);
+                }
+            }
+            $data['embeds'] = $embeds;
+        }
+        return $data;
     }
 }
